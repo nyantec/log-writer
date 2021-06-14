@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["The log-writer Authors <oss@nyantec.com>"]
 edition = "2018"
 license = "MirOS"
+description = "library to write a stream to disk while adhering usage limits"
+repository = "https://github.com/nyantec/log-writer"
 
 [dependencies]
 libc = "0.2"
