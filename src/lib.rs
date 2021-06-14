@@ -1,3 +1,6 @@
+//! A library to write a stream to disk while adhering usage limits.
+//! Inspired by journald, but more general-purpose.
+
 mod fsstats;
 
 use std::os::unix::fs::MetadataExt;
@@ -24,6 +27,11 @@ pub struct LogWriterConfig {
     pub max_file_size: usize,
 }
 
+/// Writes a stream to disk while adhering to the usage limits described in `cfg`.
+///
+/// When `write()` is called, the LogWriter will attempt to ensure enough space is
+/// available to write the new contents. In some cases, where no more space can be
+/// freed, `ENOSPC` may be returned.
 pub struct LogWriter {
     cfg: LogWriterConfig,
     current: BufWriter<fs::File>,
