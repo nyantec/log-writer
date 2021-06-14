@@ -123,6 +123,7 @@ impl LogWriter {
 
     fn next_file(&mut self) -> Result<()> {
         let (next_name, next) = create_next_file(&self.cfg)?;
+        self.current.flush()?;
         self.current_name = next_name;
         self.current = next;
         Ok(())
