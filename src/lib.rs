@@ -42,6 +42,7 @@ fn create_next_file(cfg: &LogWriterConfig) -> Result<(String, BufWriter<fs::File
 
 impl LogWriter {
     pub fn new(cfg: LogWriterConfig) -> Result<Self> {
+        fs::create_dir_all(&cfg.target_dir)?;
         let (current_name, current) = create_next_file(&cfg)?;
         Ok(Self {
             cfg,
