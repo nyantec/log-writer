@@ -17,6 +17,7 @@ pub struct LogWriterConfig {
     /// The minimum amount of space that should be kept available at all times,
     /// relative to the total space (0.01 = 1%)
     pub min_avail_of_total: Option<f64>,
+    pub warn_if_avail_reached: bool,
     /// The minimum amount of space that should be kept available at all times,
     /// in bytes
     pub min_avail_bytes: Option<usize>,
@@ -90,6 +91,9 @@ impl LogWriter {
             let avail = fsstat.available_space - len as u64;
             let avail_of_total = avail as f64 / fsstat.total_space as f64;
             if avail_of_total < min_avail_of_total {
+                if self.cfg.warn_if_avail_reached {
+                    warn!("min_avail_of_total reached, you said this shouldn't happen");
+                }
                 return Ok(false);
             }
         }
