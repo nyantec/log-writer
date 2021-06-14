@@ -1,7 +1,7 @@
 mod fsstats;
 
 use std::os::unix::fs::MetadataExt;
-use std::io::{Result, Write, BufWriter};
+use std::io::{Result, Error, Write, BufWriter};
 use std::fs;
 use std::path::PathBuf;
 use log::{info, warn};
@@ -113,10 +113,15 @@ impl LogWriter {
 
         entries.sort_by(|a, b| a.path().cmp(&b.path()));
 
-        let oldest_file = match entries.get(0) {
-            None => return Ok(false),
-            Some(file) => file,
-        };
+        let oldest_file = entries.get(0)
+            .ok_or_else(|| Error::from_raw_os_error(libc::ENOSPC))?;
+
+        let file_name = oldest_file.file_name().into_string()
+            .map_err(|_| Error::from_raw_os_error(libc::ENOSPC))?;
+
+        if file_name == self.current_name {
+            return Err(Error::from_raw_os_error(libc::ENOSPC));
+        }
 
         fs::remove_file(oldest_file.path())?;
         Ok(true)
