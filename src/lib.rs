@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use log::{info, warn};
 use chrono::Local;
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogWriterConfig {
     pub target_dir: PathBuf,
     pub prefix: String,
@@ -32,6 +33,7 @@ pub struct LogWriterConfig {
 /// When `write()` is called, the LogWriter will attempt to ensure enough space is
 /// available to write the new contents. In some cases, where no more space can be
 /// freed, `ENOSPC` may be returned.
+#[derive(Debug)]
 pub struct LogWriter {
     cfg: LogWriterConfig,
     current: BufWriter<fs::File>,
