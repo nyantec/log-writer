@@ -42,7 +42,7 @@ pub struct LogWriter {
 }
 
 fn create_next_file(cfg: &LogWriterConfig) -> Result<(String, BufWriter<fs::File>)> {
-    let name = format!("{}{}{}", cfg.prefix, Local::now().format("%Y-%m-%d"), cfg.suffix);
+    let name = format!("{}{}{}", cfg.prefix, Local::now().format("%Y-%m-%d-%H-%M-%S"), cfg.suffix);
     let file = fs::OpenOptions::new()
         .write(true)
         .create(true)
