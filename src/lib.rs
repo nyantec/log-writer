@@ -33,12 +33,24 @@ pub struct LogWriterConfig {
 /// When `write()` is called, the LogWriter will attempt to ensure enough space is
 /// available to write the new contents. In some cases, where no more space can be
 /// freed, `ENOSPC` may be returned.
-#[derive(Debug)]
-pub struct LogWriter {
+pub struct LogWriter<T: LogWriterCallbacks + Sized + Clone> {
     cfg: LogWriterConfig,
     current: BufWriter<fs::File>,
     current_name: String,
     current_size: usize,
+    callbacks: T,
+}
+
+pub trait LogWriterCallbacks: Sized + Clone {
+    fn start_file(&mut self, log_writer: &mut LogWriter<Self>) -> Result<()>;
+    fn end_file(&mut self, log_writer: &mut LogWriter<Self>) -> Result<()>;
+}
+
+#[derive(Clone)]
+struct NoopLogWriterCallbacks;
+impl LogWriterCallbacks for NoopLogWriterCallbacks {
+    fn start_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> { Ok(()) }
+    fn end_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> { Ok(()) }
 }
 
 fn create_next_file(cfg: &LogWriterConfig) -> Result<(String, BufWriter<fs::File>)> {
@@ -50,16 +62,25 @@ fn create_next_file(cfg: &LogWriterConfig) -> Result<(String, BufWriter<fs::File
     Ok((name, BufWriter::new(file)))
 } 
 
-impl LogWriter {
+impl LogWriter<NoopLogWriterCallbacks> {
     pub fn new(cfg: LogWriterConfig) -> Result<Self> {
+        LogWriter::new_with_callbacks(cfg, NoopLogWriterCallbacks)
+    }
+}
+
+impl<T: LogWriterCallbacks + Sized + Clone> LogWriter<T> {
+    pub fn new_with_callbacks(cfg: LogWriterConfig, callbacks: T) -> Result<Self> {
         fs::create_dir_all(&cfg.target_dir)?;
         let (current_name, current) = create_next_file(&cfg)?;
-        Ok(Self {
+        let mut log_writer = Self {
             cfg,
             current_name,
             current,
             current_size: 0,
-        })
+            callbacks,
+        };
+        log_writer.callbacks.clone().start_file(&mut log_writer)?;
+        Ok(log_writer)
     }
 
     fn enough_space(&mut self, len: usize) -> Result<bool> {
@@ -139,14 +160,16 @@ impl LogWriter {
 
     fn next_file(&mut self) -> Result<()> {
         let (next_name, next) = create_next_file(&self.cfg)?;
+        self.callbacks.clone().end_file(self)?;
         self.current.flush()?;
         self.current_name = next_name;
         self.current = next;
+        self.callbacks.clone().start_file(self)?;
         Ok(())
     }
 }
 
-impl Write for LogWriter {
+impl<T: LogWriterCallbacks + Sized + Clone> Write for LogWriter<T> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         if self.current_size + buf.len() > self.cfg.max_file_size {
             self.next_file()?;
