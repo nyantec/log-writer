@@ -6,6 +6,7 @@ mod fsstats;
 use std::os::unix::fs::MetadataExt;
 use std::io::{Result, Error, Write, BufWriter};
 use std::fs;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use log::{info, warn};
 use chrono::Local;
@@ -33,7 +34,7 @@ pub struct LogWriterConfig {
 /// When `write()` is called, the LogWriter will attempt to ensure enough space is
 /// available to write the new contents. In some cases, where no more space can be
 /// freed, `ENOSPC` may be returned.
-pub struct LogWriter<T: LogWriterCallbacks + Sized + Clone> {
+pub struct LogWriter<T: LogWriterCallbacks + Sized + Clone + Debug> {
     cfg: LogWriterConfig,
     current: BufWriter<fs::File>,
     current_name: String,
@@ -41,12 +42,12 @@ pub struct LogWriter<T: LogWriterCallbacks + Sized + Clone> {
     callbacks: T,
 }
 
-pub trait LogWriterCallbacks: Sized + Clone {
+pub trait LogWriterCallbacks: Sized + Clone + Debug {
     fn start_file(&mut self, log_writer: &mut LogWriter<Self>) -> Result<()>;
     fn end_file(&mut self, log_writer: &mut LogWriter<Self>) -> Result<()>;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct NoopLogWriterCallbacks;
 impl LogWriterCallbacks for NoopLogWriterCallbacks {
     fn start_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> { Ok(()) }
@@ -68,7 +69,7 @@ impl LogWriter<NoopLogWriterCallbacks> {
     }
 }
 
-impl<T: LogWriterCallbacks + Sized + Clone> LogWriter<T> {
+impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
     pub fn new_with_callbacks(cfg: LogWriterConfig, callbacks: T) -> Result<Self> {
         fs::create_dir_all(&cfg.target_dir)?;
         let (current_name, current) = create_next_file(&cfg)?;
@@ -169,7 +170,7 @@ impl<T: LogWriterCallbacks + Sized + Clone> LogWriter<T> {
     }
 }
 
-impl<T: LogWriterCallbacks + Sized + Clone> Write for LogWriter<T> {
+impl<T: LogWriterCallbacks + Sized + Clone + Debug> Write for LogWriter<T> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         if self.current_size + buf.len() > self.cfg.max_file_size {
             self.next_file()?;
