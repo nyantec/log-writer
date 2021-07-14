@@ -164,6 +164,7 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
         self.callbacks.clone().end_file(self)?;
         self.current.flush()?;
         self.current_name = next_name;
+        self.current_size = 0;
         self.current = next;
         self.callbacks.clone().start_file(self)?;
         Ok(())
