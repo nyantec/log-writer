@@ -48,7 +48,7 @@ pub trait LogWriterCallbacks: Sized + Clone + Debug {
 }
 
 #[derive(Clone, Debug)]
-struct NoopLogWriterCallbacks;
+pub struct NoopLogWriterCallbacks;
 impl LogWriterCallbacks for NoopLogWriterCallbacks {
     fn start_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> { Ok(()) }
     fn end_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> { Ok(()) }
