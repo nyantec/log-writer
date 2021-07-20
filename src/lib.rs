@@ -10,8 +10,11 @@ use std::fmt::Debug;
 use std::path::PathBuf;
 use log::{info, warn};
 use chrono::Local;
+#[cfg(feature = "serde")]
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct LogWriterConfig {
     pub target_dir: PathBuf,
     pub prefix: String,
