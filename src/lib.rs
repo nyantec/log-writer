@@ -3,6 +3,7 @@
 
 mod fsstats;
 
+use std::time::Instant;
 use std::os::unix::fs::MetadataExt;
 use std::io::{Result, Error, Write, BufWriter};
 use std::fs;
@@ -30,6 +31,8 @@ pub struct LogWriterConfig {
     /// in bytes
     pub min_avail_bytes: Option<usize>,
     pub max_file_size: usize,
+    /// Rotated after X seconds, regardless of size
+    pub max_file_age: Option<u64>,
 }
 
 /// Writes a stream to disk while adhering to the usage limits described in `cfg`.
@@ -42,6 +45,7 @@ pub struct LogWriter<T: LogWriterCallbacks + Sized + Clone + Debug> {
     current: BufWriter<fs::File>,
     current_name: String,
     current_size: usize,
+    write_start: Instant,
     callbacks: T,
 }
 
@@ -81,6 +85,7 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
             current_name,
             current,
             current_size: 0,
+            write_start: Instant::now(),
             callbacks,
         };
         log_writer.callbacks.clone().start_file(&mut log_writer)?;
@@ -168,6 +173,7 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
         self.current.flush()?;
         self.current_name = next_name;
         self.current_size = 0;
+        self.write_start = Instant::now();
         self.current = next;
         self.callbacks.clone().start_file(self)?;
         Ok(())
@@ -178,6 +184,11 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> Write for LogWriter<T> {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         if self.current_size + buf.len() > self.cfg.max_file_size {
             self.next_file()?;
+        }
+        if let Some(max_file_age) = self.cfg.max_file_age {
+            if Instant::now().duration_since(self.write_start).as_secs() > max_file_age {
+                self.next_file()?;
+            }
         }
 
         while !self.enough_space(buf.len())? {
