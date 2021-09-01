@@ -23,6 +23,9 @@ pub struct LogWriterConfig {
     /// The maximum amount of space that is allowed to be used,
     /// relative to the total space (0.01 = 1%)
     pub max_use_of_total: Option<f64>,
+    /// The maximum amount of space that is allowed to be used,
+    /// in bytes
+    pub max_use_bytes: Option<u64>,
     /// The minimum amount of space that should be kept available at all times,
     /// relative to the total space (0.01 = 1%)
     pub min_avail_of_total: Option<f64>,
@@ -95,8 +98,19 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
     fn enough_space(&mut self, len: usize) -> Result<bool> {
         let fsstat = fsstats::statvfs(&self.cfg.target_dir)?;
 
+        let mut size_limit = u64::MAX;
+
+        if let Some(max_use_bytes) = self.cfg.max_use_bytes {
+            size_limit = std::cmp::min(size_limit, max_use_bytes);
+        }
+
         if let Some(max_use_of_total) = self.cfg.max_use_of_total {
-            let mut used = 0;
+            let max_use_bytes = (max_use_of_total * fsstat.total_space as f64) as u64;
+            size_limit = std::cmp::min(size_limit, max_use_bytes);
+        }
+
+        if size_limit != u64::MAX {
+            let mut used = 0u64;
             for entry in fs::read_dir(&self.cfg.target_dir)? {
                 let entry = match entry {
                     Err(_) => {
@@ -122,8 +136,7 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
 
                 used += meta.blocks() * 512;
             };
-            let used_of_total = used as f64 / fsstat.total_space as f64;
-            if used_of_total > max_use_of_total {
+            if used > size_limit {
                 return Ok(false);
             }
         }
