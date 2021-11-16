@@ -36,6 +36,11 @@ pub struct LogWriterConfig {
     pub max_file_size: usize,
     /// Rotated after X seconds, regardless of size
     pub max_file_age: Option<u64>,
+    /// Disk space subtracted when checking if max_use_of_total is reached.
+    /// Set this to the absolute amount of space you expect other services to take up on the
+    /// partition.
+    /// in bytes
+    pub reserved: Option<usize>,
 }
 
 /// Writes a stream to disk while adhering to the usage limits described in `cfg`.
@@ -105,7 +110,10 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
         }
 
         if let Some(max_use_of_total) = self.cfg.max_use_of_total {
-            let max_use_bytes = (max_use_of_total * fsstat.total_space as f64) as u64;
+            let mut max_use_bytes = (max_use_of_total * fsstat.total_space as f64) as u64;
+            if let Some(reserved) = self.cfg.reserved {
+                max_use_bytes -= reserved as u64;
+            };
             size_limit = std::cmp::min(size_limit, max_use_bytes);
         }
 
