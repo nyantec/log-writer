@@ -131,7 +131,9 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
 
                 let meta = match entry.metadata() {
                     Err(_) => {
-                        info!("could not get metadata for \"{:?}\", ignoring for size calculation", &path);
+                        if path.file_name() != PathBuf::from("lost+found").file_name() {
+                            info!("could not get metadata for \"{:?}\", ignoring for size calculation", &path);
+                        }
                         continue;
                     },
                     Ok(meta) => meta,
