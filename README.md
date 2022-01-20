@@ -11,6 +11,7 @@ Copyright © 2021 nyantec GmbH <oss@nyantec.com>
 
 Authors:
   Milan Pässler <mil@nyantec.com>
+  Yureka <yka@nyantec.com>
 
 Provided that these terms and disclaimer and all copyright notices
 are retained or reproduced in an accompanying document, permission
