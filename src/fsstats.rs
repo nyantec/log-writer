@@ -1,8 +1,8 @@
+use std::ffi::CString;
+use std::io::{Error, ErrorKind, Result};
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt;
-use std::ffi::CString;
 use std::path::Path;
-use std::io::{Result, Error, ErrorKind};
 
 /// `FsStats` contains some common stats about a file system.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -19,17 +19,17 @@ pub(crate) fn statvfs(path: &Path) -> Result<FsStats> {
         Err(..) => return Err(Error::new(ErrorKind::InvalidInput, "path contained a null")),
     };
 
-	let mut stat: MaybeUninit<libc::statvfs> = MaybeUninit::zeroed();
+    let mut stat: MaybeUninit<libc::statvfs> = MaybeUninit::zeroed();
 
-	if unsafe { libc::statvfs(cstr.as_ptr() as *const _, stat.as_mut_ptr()) } != 0 {
-		Err(Error::last_os_error())
-	} else {
-		let stat = unsafe { stat.assume_init() };
-		Ok(FsStats {
-			free_space: stat.f_frsize as u64 * stat.f_bfree as u64,
-			available_space: stat.f_frsize as u64 * stat.f_bavail as u64,
-			total_space: stat.f_frsize as u64 * stat.f_blocks as u64,
-			allocation_granularity: stat.f_frsize as u64,
-		})
-	}
+    if unsafe { libc::statvfs(cstr.as_ptr() as *const _, stat.as_mut_ptr()) } != 0 {
+        Err(Error::last_os_error())
+    } else {
+        let stat = unsafe { stat.assume_init() };
+        Ok(FsStats {
+            free_space: stat.f_frsize as u64 * stat.f_bfree as u64,
+            available_space: stat.f_frsize as u64 * stat.f_bavail as u64,
+            total_space: stat.f_frsize as u64 * stat.f_blocks as u64,
+            allocation_granularity: stat.f_frsize as u64,
+        })
+    }
 }

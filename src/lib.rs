@@ -3,16 +3,16 @@
 
 mod fsstats;
 
-use std::time::Instant;
-use std::os::unix::fs::MetadataExt;
-use std::io::{Result, Error, Write, BufWriter};
-use std::fs;
-use std::fmt::Debug;
-use std::path::PathBuf;
-use log::{info, warn};
 use chrono::Local;
+use log::{info, warn};
 #[cfg(feature = "serde")]
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
+use std::fs;
+use std::io::{BufWriter, Error, Result, Write};
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -65,18 +65,27 @@ pub trait LogWriterCallbacks: Sized + Clone + Debug {
 #[derive(Clone, Debug)]
 pub struct NoopLogWriterCallbacks;
 impl LogWriterCallbacks for NoopLogWriterCallbacks {
-    fn start_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> { Ok(()) }
-    fn end_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> { Ok(()) }
+    fn start_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> {
+        Ok(())
+    }
+    fn end_file(&mut self, _log_writer: &mut LogWriter<Self>) -> Result<()> {
+        Ok(())
+    }
 }
 
 fn create_next_file(cfg: &LogWriterConfig) -> Result<(String, BufWriter<fs::File>)> {
-    let name = format!("{}{}{}", cfg.prefix, Local::now().format("%Y-%m-%d-%H-%M-%S"), cfg.suffix);
+    let name = format!(
+        "{}{}{}",
+        cfg.prefix,
+        Local::now().format("%Y-%m-%d-%H-%M-%S"),
+        cfg.suffix
+    );
     let file = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .open(cfg.target_dir.join(&name))?;
     Ok((name, BufWriter::new(file)))
-} 
+}
 
 impl LogWriter<NoopLogWriterCallbacks> {
     pub fn new(cfg: LogWriterConfig) -> Result<Self> {
@@ -100,6 +109,22 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
         Ok(log_writer)
     }
 
+    fn file_listing<'a>(&'a self) -> Result<impl Iterator<Item = (fs::DirEntry, String)> + 'a> {
+        let prefix = self.cfg.prefix.clone();
+        let suffix = self.cfg.suffix.clone();
+        let iter = fs::read_dir(&self.cfg.target_dir)?
+            .filter_map(|x| x.ok())
+            .filter(|x| x.file_type().and_then(|t| Ok(t.is_file())).unwrap_or(false))
+            .filter_map(|file| match file.file_name().into_string() {
+                Ok(file_name) => Some((file, file_name)),
+                Err(_) => None,
+            })
+            .filter(move |(_, file_name)| {
+                file_name.starts_with(&prefix) && file_name.ends_with(&suffix)
+            });
+        Ok(iter)
+    }
+
     fn enough_space(&mut self, len: usize) -> Result<bool> {
         let fsstat = fsstats::statvfs(&self.cfg.target_dir)?;
 
@@ -119,33 +144,22 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
 
         if size_limit != u64::MAX {
             let mut used = 0u64;
-            for entry in fs::read_dir(&self.cfg.target_dir)? {
-                let entry = match entry {
-                    Err(_) => {
-                        info!("entry get failed during size calculation");
-                        continue;
-                    },
-                    Ok(entry) => entry,
-                };
+            for (entry, _) in self.file_listing()? {
                 let path = entry.path();
 
                 let meta = match entry.metadata() {
                     Err(_) => {
-                        if path.file_name() != PathBuf::from("lost+found").file_name() {
-                            info!("could not get metadata for \"{:?}\", ignoring for size calculation", &path);
-                        }
+                        info!(
+                            "could not get metadata for \"{:?}\", ignoring for size calculation",
+                            &path
+                        );
                         continue;
-                    },
+                    }
                     Ok(meta) => meta,
                 };
 
-                if !meta.is_file() {
-                    info!("ignoring non-file \"{:?}\" for size calculation", &path);
-                    continue;
-                }
-
                 used += meta.blocks() * 512;
-            };
+            }
             if used > size_limit {
                 return Ok(false);
             }
@@ -169,20 +183,20 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
     /// returns Ok(true) if a file was deleted.
     /// returns Ok(false) if there was no file to delete.
     fn cleanup(&mut self) -> Result<bool> {
-        let mut entries: Vec<_> = fs::read_dir(&self.cfg.target_dir)?
-            .filter_map(|x| x.ok())
-            .filter(|x| x.file_type().and_then(|t| Ok(t.is_file())).unwrap_or(false))
-            .collect();
+        let mut entries: Vec<_> = self.file_listing()?.collect();
 
-        entries.sort_by(|a, b| a.path().cmp(&b.path()));
+        entries.sort_by(|(_, a), (_, b)| a.cmp(&b));
 
-        let oldest_file = entries.get(0)
-            .ok_or_else(|| Error::from_raw_os_error(libc::ENOSPC))?;
+        let (oldest_file, file_name) = match entries.get(0) {
+            Some(v) => v,
+            None => {
+                warn!("log-writer can not free space: no files to delete");
+                return Err(Error::from_raw_os_error(libc::ENOSPC));
+            }
+        };
 
-        let file_name = oldest_file.file_name().into_string()
-            .map_err(|_| Error::from_raw_os_error(libc::ENOSPC))?;
-
-        if file_name == self.current_name {
+        if *file_name == self.current_name {
+            warn!("log-writer can not free space: oldest file is current file");
             return Err(Error::from_raw_os_error(libc::ENOSPC));
         }
 
