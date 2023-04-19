@@ -1,16 +1,13 @@
 //! A library to write a stream to disk while adhering usage limits.
 //! Inspired by journald, but more general-purpose.
 
-mod fsstats;
-
 use chrono::Local;
-use log::{info, warn};
+use log::{warn};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::fs;
 use std::io::{BufWriter, Error, Result, Write};
-use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -20,28 +17,12 @@ pub struct LogWriterConfig {
     pub target_dir: PathBuf,
     pub prefix: String,
     pub suffix: String,
-    /// The maximum amount of space that is allowed to be used,
-    /// relative to the total space (0.01 = 1%)
-    pub max_use_of_total: Option<f64>,
-    /// The maximum amount of space that is allowed to be used,
-    /// in bytes
-    pub max_use_bytes: Option<u64>,
-    /// The minimum amount of space that should be kept available at all times,
-    /// relative to the total space (0.01 = 1%)
-    pub min_avail_of_total: Option<f64>,
-    pub warn_if_avail_reached: bool,
-    /// The minimum amount of space that should be kept available at all times,
-    /// in bytes
-    pub min_avail_bytes: Option<usize>,
+
     pub max_file_size: usize,
     pub max_file_count: u32,
+
     /// Rotated after X seconds, regardless of size
     pub max_file_age: Option<u64>,
-    /// Disk space subtracted when checking if max_use_of_total is reached.
-    /// Set this to the absolute amount of space you expect other services to take up on the
-    /// partition.
-    /// in bytes
-    pub reserved: Option<usize>,
 }
 
 /// Writes a stream to disk while adhering to the usage limits described in `cfg`.
@@ -106,6 +87,7 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
             write_start: Instant::now(),
             callbacks,
         };
+        log_writer.cleanup()?;
         log_writer.callbacks.clone().start_file(&mut log_writer)?;
         Ok(log_writer)
     }
@@ -126,72 +108,32 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
         Ok(iter)
     }
 
-    fn enough_space(&mut self, len: usize) -> Result<bool> {
-        let fsstat = fsstats::statvfs(&self.cfg.target_dir)?;
+    fn needs_cleanup(&mut self) -> Result<bool> {
+        let mut file_count = 0;
 
-        let mut size_limit = u64::MAX;
-
-        if let Some(max_use_bytes) = self.cfg.max_use_bytes {
-            size_limit = std::cmp::min(size_limit, max_use_bytes);
+        for (_, _) in self.file_listing()? {
+            file_count += 1;
         }
 
-        if let Some(max_use_of_total) = self.cfg.max_use_of_total {
-            let mut max_use_bytes = (max_use_of_total * fsstat.total_space as f64) as u64;
-            if let Some(reserved) = self.cfg.reserved {
-                max_use_bytes -= reserved as u64;
-            };
-            size_limit = std::cmp::min(size_limit, max_use_bytes);
+        if file_count >= self.cfg.max_file_count {
+            return Ok(true);
+        } else {
+            return Ok(false);
+        }
+    }
+
+    fn cleanup(&mut self) -> Result<()> {
+        while self.needs_cleanup()? {
+            self.cleanup_one()?;
         }
 
-        if size_limit != u64::MAX {
-            let mut used = 0u64;
-            let mut count = 0;
-            for (entry, _) in self.file_listing()? {
-                count += 1;
-
-                let path = entry.path();
-
-                let meta = match entry.metadata() {
-                    Err(_) => {
-                        info!(
-                            "could not get metadata for \"{:?}\", ignoring for size calculation",
-                            &path
-                        );
-                        continue;
-                    }
-                    Ok(meta) => meta,
-                };
-
-                used += meta.blocks() * 512;
-            }
-
-            if count > self.cfg.max_file_count {
-                return Ok(false);
-            }
-
-            if used > size_limit {
-                return Ok(false);
-            }
-        }
-
-        if let Some(min_avail_of_total) = self.cfg.min_avail_of_total {
-            let avail = fsstat.available_space - len as u64;
-            let avail_of_total = avail as f64 / fsstat.total_space as f64;
-            if avail_of_total < min_avail_of_total {
-                if self.cfg.warn_if_avail_reached {
-                    warn!("min_avail_of_total reached, you said this shouldn't happen");
-                }
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
+        return Ok(());
     }
 
     /// deletes one file.
     /// returns Ok(true) if a file was deleted.
     /// returns Ok(false) if there was no file to delete.
-    fn cleanup(&mut self) -> Result<bool> {
+    fn cleanup_one(&mut self) -> Result<bool> {
         let mut entries: Vec<_> = self.file_listing()?.collect();
 
         entries.sort_by(|(_, a), (_, b)| a.cmp(&b));
@@ -214,6 +156,7 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
     }
 
     fn next_file(&mut self) -> Result<()> {
+        self.cleanup()?;
         let (next_name, next) = create_next_file(&self.cfg)?;
         self.callbacks.clone().end_file(self)?;
         self.current.flush()?;
@@ -231,16 +174,10 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> Write for LogWriter<T> {
         if self.current_size + buf.len() > self.cfg.max_file_size {
             self.next_file()?;
         }
+
         if let Some(max_file_age) = self.cfg.max_file_age {
             if Instant::now().duration_since(self.write_start).as_secs() > max_file_age {
                 self.next_file()?;
-            }
-        }
-
-        while !self.enough_space(buf.len())? {
-            if !self.cleanup()? {
-                warn!("could not free enough space, this might cause strange behaviour");
-                break;
             }
         }
 
