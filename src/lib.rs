@@ -34,6 +34,7 @@ pub struct LogWriterConfig {
     /// in bytes
     pub min_avail_bytes: Option<usize>,
     pub max_file_size: usize,
+    pub max_file_count: u32,
     /// Rotated after X seconds, regardless of size
     pub max_file_age: Option<u64>,
     /// Disk space subtracted when checking if max_use_of_total is reached.
@@ -144,7 +145,10 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
 
         if size_limit != u64::MAX {
             let mut used = 0u64;
+            let mut count = 0;
             for (entry, _) in self.file_listing()? {
+                count += 1;
+
                 let path = entry.path();
 
                 let meta = match entry.metadata() {
@@ -160,6 +164,11 @@ impl<T: LogWriterCallbacks + Sized + Clone + Debug> LogWriter<T> {
 
                 used += meta.blocks() * 512;
             }
+
+            if count > self.cfg.max_file_count {
+                return Ok(false);
+            }
+
             if used > size_limit {
                 return Ok(false);
             }
